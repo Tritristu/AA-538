@@ -48,5 +48,5 @@ boundaryCond = np.array([[1],
 scenarios = np.array([[1,1]])
 
 globalStiffness,elementStiffness = fea.GlobalStiffnessMatrix(nodes,materials,elements)
-displacements,elementStresses,forces = fea.globalSolution(nodes,elements,globalStiffness,elementStiffness,boundaryCond,forceCases,scenarios)
+displacements,elementStresses,forces = fea.globalSolution(elements,globalStiffness,elementStiffness,boundaryCond,forceCases,scenarios)
 print(elementStresses)

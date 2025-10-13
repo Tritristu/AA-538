@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import scipy
 import copy
 
 
@@ -131,7 +131,7 @@ def AddToGlobal(globalStiffness,rotatedStiffness,node1,node2):
     globalStiffness[position2:position2+2,position2:position2+2] += rotatedStiffness[2:4,2:4]
     return globalStiffness
 
-# Description: 
+# Description: [WIP]
 #     This function calculates the stiffness matrix of an element in the global coordinate system
 # Assumptions:
 #     - This system is 2D
@@ -162,31 +162,37 @@ def AddToGlobal(globalStiffness,rotatedStiffness,node1,node2):
 # Outputs:
 #     - globalStiffness: the global stiffness matrix of a system
 #     - elementStiffnesse: the 1x4 stiffness vectors of each element stored as a DOFx4 matrix
-def GlobalStiffnessMatrix(nodes,materials,elements):
+
+def GlobalSetup(nodes,materials,elements):
     DegreesOfFreedom = DOF(len(nodes[:,0]))
     globalStiffness = np.zeros((DegreesOfFreedom,DegreesOfFreedom))
-    elementStiffness = np.zeros((len(elements[:,0]),4))
+    elementStiffness = np.zeros((elements.shape[0],4))
+    dKdAk = np.zeros((elements.shape[0],4,4))
     for i,eachElement in enumerate(elements[:,0]):
         # Extract book keeping data
-        material = int(elements[i-1][1])
-        node1 = int(elements[i-1][2])
-        node2 = int(elements[i-1][3])
-        area = elements[i-1][4]
+        material = int(elements[i][1])
+        node1 = int(elements[i][2])
+        node2 = int(elements[i][3])
+        area = elements[i][4]
         density = materials[material-1][2]
         youngsModulus = materials[material-1][1]
 
-        # Calculate lenght and angle data
+        # Calculate element properties
         length,angle = elementProperties(node1,node2,nodes)
-        # volume = area*length
-        # mass = volume*density
+        volume = area*length
+        mass = volume*density
 
         # Create stiffness matrix and add to global
         localStiffness = localStiffnessMatrix(area,youngsModulus,length)
         transformation = transformationMatrix(angle)
+        
         rotatedStiffness = transformation.T @ localStiffness @ transformation
         globalStiffness = AddToGlobal(globalStiffness,rotatedStiffness,node1,node2)
-        elementStiffness[i-1] = (youngsModulus/length)*np.array([-transformation[0][0],transformation[1][0],transformation[0][0],transformation[0][1]])
-    return globalStiffness,elementStiffness
+        elementStiffness[i] = (youngsModulus/length)*np.array([-transformation[0][0],transformation[1][0],transformation[0][0],transformation[0][1]])
+
+        # Calculate the element-wise stiffness derivative with respect to element area
+        dKdAk[i] = rotatedStiffness/area
+    return globalStiffness,elementStiffness,dKdAk
 
 # Description: 
 #     This function modifies the global stiffness matrix and forcing based on boundary conditions
@@ -246,14 +252,14 @@ def SpecificConditions(globalStiffness,boundaryCondition,forcing):
 #     - modifiedStiffness: a DOFxDOF stiffness matrix where fixed degrees-of-freedom 
 #       rows & columns have been zeroed out except for the diagonal
 #     - modifiedForcing: a DOFx1 column vector with forces corresponding to a fixed degree of freedom zeroed out
-def globalSolution(nodes,elements,globalStiffness,elementStiffness,boundaryConditions,forceCases,scenarios):
+def GlobalSolution(elements,globalStiffness,elementStiffness,boundaryConditions,forceCases,scenarios):
     elementStresses = np.zeros((len(elements),len(scenarios)))
-    displacements = np.zeros((DOF(len(nodes[:,0])),len(scenarios)))
-    forces = np.zeros((DOF(len(nodes[:,0])),len(scenarios)))
+    displacements = np.zeros((len(globalStiffness),len(scenarios)))
+    forces = np.zeros((len(globalStiffness),len(scenarios)))
     for i,scenario in enumerate(scenarios):
         modStiffness,modForcing = SpecificConditions(globalStiffness,boundaryConditions[:,scenario[0]-1:scenario[0]],forceCases[:,scenario[1]-1:scenario[1]])
         displacements[:,i:i+1] = np.linalg.pinv(modStiffness) @ modForcing
-        forces[:,i:i+1] = globalStiffness @ displacements
+        forces[:,i:i+1] = globalStiffness @ displacements[:,i:i+1]
         for j,eachElement in enumerate(elements[:,0:1]):
             node1 = int(elements[j][2])
             node2 = int(elements[j][3])
@@ -262,3 +268,42 @@ def globalSolution(nodes,elements,globalStiffness,elementStiffness,boundaryCondi
             displacement = np.vstack((displacementNode1,displacementNode2))
             elementStresses[j,i] = elementStiffness[j] @ displacement
     return displacements,elementStresses,forces
+
+def PseudoForce(elements,displacements,dKdA):
+    pseudoForce = np.zeros((displacements.shape[0],1))
+    for i,elementdKdA in enumerate(dKdA):
+            node1 = int(elements[i][2])
+            node2 = int(elements[i][3])
+            position1 = NodeToDOFX(node1)-1
+            position2 = NodeToDOFX(node2)-1
+            displacementNode1 = displacements[position1:position1+2,0:1]
+            displacementNode2 = displacements[position2:position2+2,0:1]
+            displacement = np.vstack((displacementNode1,displacementNode2))
+            elementPseudoForce = elementdKdA @ displacement
+            pseudoForce[position1:position1+2,0:1] = elementPseudoForce[0:2,0:1]
+            pseudoForce[position2:position2+2,0:1] = elementPseudoForce[0:2,0:1]
+    return -1*pseudoForce
+
+def PseudoDisplacement(globalStiffness,pseudoForce):
+    L,U = scipy.linalg.lu(globalStiffness,permute_l=True)
+    return scipy.linalg.inv(U) @ scipy.linalg.inv(L) @ pseudoForce
+
+# def dStressdArea():
+#     dsdA = 
+#     return dsdA
+
+    # elementStresses = np.zeros((len(elements),len(scenarios)))
+    # displacements = np.zeros((len(globalStiffness),len(scenarios)))
+    # forces = np.zeros((len(globalStiffness),len(scenarios)))
+    # for i,scenario in enumerate(scenarios):
+    #     modStiffness,modForcing = SpecificConditions(globalStiffness,boundaryConditions[:,scenario[0]-1:scenario[0]],forceCases[:,scenario[1]-1:scenario[1]])
+    #     displacements[:,i:i+1] = np.linalg.pinv(modStiffness) @ modForcing
+    #     forces[:,i:i+1] = globalStiffness @ displacements
+    #     for j,eachElement in enumerate(elements[:,0:1]):
+    #         node1 = int(elements[j][2])
+    #         node2 = int(elements[j][3])
+    #         displacementNode1 = displacements[NodeToDOFX(node1)-1:NodeToDOFX(node1)+1,i:i+1]
+    #         displacementNode2 = displacements[NodeToDOFX(node2)-1:NodeToDOFX(node2)+1,i:i+1]
+    #         displacement = np.vstack((displacementNode1,displacementNode2))
+    #         elementStresses[j,i] = elementStiffness[j] @ displacement
+    # return displacements,elementStresses,forces
