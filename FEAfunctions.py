@@ -69,7 +69,7 @@ def DOFtoNode(DOF):
 #     - length: the length of the element
 #     - angle: the angle of the element in radians
 def elementProperties(node1,node2,nodes):
-    differenceVector = nodes[node1-1][1:3] - nodes[node2-1][1:3]
+    differenceVector = nodes[node2-1][1:3] - nodes[node1-1][1:3]
     length = np.linalg.norm(differenceVector)
     angle = np.arctan2(differenceVector[1],differenceVector[0])
     return length,angle
@@ -87,10 +87,10 @@ def elementProperties(node1,node2,nodes):
 def transformationMatrix(angle):
     c = np.cos(angle)
     s = np.sin(angle)
-    return np.array([[c,-s,0,0],
-                     [s,c,0,0],
-                     [0,0,c,-s],
-                     [0,0,s,c]])
+    return np.array([[c,s,0,0],
+                     [-s,c,0,0],
+                     [0,0,c,s],
+                     [0,0,-s,c]])
 
 # Description: 
 #     This function calculates the stiffness matrix of an element in the local coordinate system
@@ -267,43 +267,55 @@ def GlobalSolution(elements,globalStiffness,elementStiffness,boundaryConditions,
             displacementNode2 = displacements[NodeToDOFX(node2)-1:NodeToDOFX(node2)+1,i:i+1]
             displacement = np.vstack((displacementNode1,displacementNode2))
             elementStresses[j,i] = elementStiffness[j] @ displacement
-    return displacements,elementStresses,forces
+    return displacements,elementStresses
 
 def PseudoForce(elements,displacements,dKdA):
-    pseudoForce = np.zeros((displacements.shape[0],1))
-    for i,elementdKdA in enumerate(dKdA):
-            node1 = int(elements[i][2])
-            node2 = int(elements[i][3])
-            position1 = NodeToDOFX(node1)-1
-            position2 = NodeToDOFX(node2)-1
-            displacementNode1 = displacements[position1:position1+2,0:1]
-            displacementNode2 = displacements[position2:position2+2,0:1]
-            displacement = np.vstack((displacementNode1,displacementNode2))
-            elementPseudoForce = elementdKdA @ displacement
-            pseudoForce[position1:position1+2,0:1] = elementPseudoForce[0:2,0:1]
-            pseudoForce[position2:position2+2,0:1] = elementPseudoForce[0:2,0:1]
+    pseudoForce = np.zeros((displacements.shape[0],displacements.shape[1]))
+    for i,scenario in enumerate(displacements[0]):
+        for j,elementdKdA in enumerate(dKdA):
+                node1 = int(elements[j][2])
+                node2 = int(elements[j][3])
+                position1 = NodeToDOFX(node1)-1
+                position2 = NodeToDOFX(node2)-1
+                displacementNode1 = displacements[position1:position1+2,i:i+1]
+                displacementNode2 = displacements[position2:position2+2,i:i+1]
+                displacement = np.vstack((displacementNode1,displacementNode2))
+                elementPseudoForce = elementdKdA @ displacement
+                pseudoForce[position1:position1+2,i:i+1] = elementPseudoForce[0:2,0:1]
+                pseudoForce[position2:position2+2,i:i+1] = elementPseudoForce[2:4,0:1]
     return -1*pseudoForce
 
 def PseudoDisplacement(globalStiffness,pseudoForce):
     L,U = scipy.linalg.lu(globalStiffness,permute_l=True)
-    return scipy.linalg.inv(U) @ scipy.linalg.inv(L) @ pseudoForce
+    return scipy.linalg.pinv(U) @ scipy.linalg.pinv(L) @ pseudoForce
 
-# def dStressdArea():
-#     dsdA = 
-#     return dsdA
+def dStressdArea(elements,pseudoDisplacements,elementStiffnesses):
+    dsdA = np.zeros((elements.shape[0],pseudoDisplacements.shape[1]))
+    for i,scenario in enumerate(pseudoDisplacements[0]):
+        for j,elementStiffness in enumerate(elementStiffnesses):
+                node1 = int(elements[j][2])
+                node2 = int(elements[j][3])
+                position1 = NodeToDOFX(node1)-1
+                position2 = NodeToDOFX(node2)-1
+                displacementNode1 = pseudoDisplacements[position1:position1+2,i:i+1]
+                displacementNode2 = pseudoDisplacements[position2:position2+2,i:i+1]
+                pseudoDisplacement = np.vstack((displacementNode1,displacementNode2))
+                dsdA[j,i] = elementStiffness @ pseudoDisplacement
+    return dsdA
 
-    # elementStresses = np.zeros((len(elements),len(scenarios)))
-    # displacements = np.zeros((len(globalStiffness),len(scenarios)))
-    # forces = np.zeros((len(globalStiffness),len(scenarios)))
-    # for i,scenario in enumerate(scenarios):
-    #     modStiffness,modForcing = SpecificConditions(globalStiffness,boundaryConditions[:,scenario[0]-1:scenario[0]],forceCases[:,scenario[1]-1:scenario[1]])
-    #     displacements[:,i:i+1] = np.linalg.pinv(modStiffness) @ modForcing
-    #     forces[:,i:i+1] = globalStiffness @ displacements
-    #     for j,eachElement in enumerate(elements[:,0:1]):
-    #         node1 = int(elements[j][2])
-    #         node2 = int(elements[j][3])
-    #         displacementNode1 = displacements[NodeToDOFX(node1)-1:NodeToDOFX(node1)+1,i:i+1]
-    #         displacementNode2 = displacements[NodeToDOFX(node2)-1:NodeToDOFX(node2)+1,i:i+1]
-    #         displacement = np.vstack((displacementNode1,displacementNode2))
-    #         elementStresses[j,i] = elementStiffness[j] @ displacement
-    # return displacements,elementStresses,forces
+# def GlobalSolution(elements,globalStiffness,elementStiffness,boundaryConditions,forceCases,scenarios):
+#     elementStresses = np.zeros((len(elements),len(scenarios)))
+#     displacements = np.zeros((len(globalStiffness),len(scenarios)))
+#     forces = np.zeros((len(globalStiffness),len(scenarios)))
+#     for i,scenario in enumerate(scenarios):
+#         modStiffness,modForcing = SpecificConditions(globalStiffness,boundaryConditions[:,scenario[0]-1:scenario[0]],forceCases[:,scenario[1]-1:scenario[1]])
+#         displacements[:,i:i+1] = np.linalg.pinv(modStiffness) @ modForcing
+#         forces[:,i:i+1] = globalStiffness @ displacements[:,i:i+1]
+#         for j,eachElement in enumerate(elements[:,0:1]):
+#             node1 = int(elements[j][2])
+#             node2 = int(elements[j][3])
+#             displacementNode1 = displacements[NodeToDOFX(node1)-1:NodeToDOFX(node1)+1,i:i+1]
+#             displacementNode2 = displacements[NodeToDOFX(node2)-1:NodeToDOFX(node2)+1,i:i+1]
+#             displacement = np.vstack((displacementNode1,displacementNode2))
+#             elementStresses[j,i] = elementStiffness[j] @ displacement
+#     return displacements,elementStresses,forces
