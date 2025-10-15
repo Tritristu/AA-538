@@ -269,7 +269,7 @@ def GlobalSolution(elements,globalStiffness,elementStiffness,boundaryConditions,
             elementStresses[j,i] = elementStiffness[j] @ displacement
     return displacements,elementStresses
 
-def PseudoForce(elements,displacements,dKdA):
+def PseudoForce(elements,displacements,dKdA,boundaryConditions):
     pseudoForce = np.zeros((displacements.shape[0],displacements.shape[1]))
     for i,scenario in enumerate(displacements[0]):
         for j,elementdKdA in enumerate(dKdA):
@@ -277,17 +277,19 @@ def PseudoForce(elements,displacements,dKdA):
                 node2 = int(elements[j][3])
                 position1 = NodeToDOFX(node1)-1
                 position2 = NodeToDOFX(node2)-1
+                newElementdKdA = NewElementdKdA(elementdKdA,node1,node2,boundaryConditions)
                 displacementNode1 = displacements[position1:position1+2,i:i+1]
                 displacementNode2 = displacements[position2:position2+2,i:i+1]
                 displacement = np.vstack((displacementNode1,displacementNode2))
-                elementPseudoForce = elementdKdA @ displacement
-                pseudoForce[position1:position1+2,i:i+1] = elementPseudoForce[0:2,0:1]
-                pseudoForce[position2:position2+2,i:i+1] = elementPseudoForce[2:4,0:1]
+                elementPseudoForce = newElementdKdA @ displacement
+                pseudoForce[position1:position1+2,i:i+1] += elementPseudoForce[0:2,0:1]
+                pseudoForce[position2:position2+2,i:i+1] += elementPseudoForce[2:4,0:1]
     return -1*pseudoForce
 
 def PseudoDisplacement(globalStiffness,pseudoForce):
-    L,U = scipy.linalg.lu(globalStiffness,permute_l=True)
-    return scipy.linalg.pinv(U) @ scipy.linalg.pinv(L) @ pseudoForce
+    # L,U = scipy.linalg.lu(globalStiffness,permute_l=True)
+    # return scipy.linalg.pinv(U) @ scipy.linalg.pinv(L) @ pseudoForce
+    return scipy.linalg.pinv(globalStiffness) @ pseudoForce
 
 def dStressdArea(elements,pseudoDisplacements,elementStiffnesses):
     dsdA = np.zeros((elements.shape[0],pseudoDisplacements.shape[1]))
@@ -303,19 +305,21 @@ def dStressdArea(elements,pseudoDisplacements,elementStiffnesses):
                 dsdA[j,i] = elementStiffness @ pseudoDisplacement
     return dsdA
 
-# def GlobalSolution(elements,globalStiffness,elementStiffness,boundaryConditions,forceCases,scenarios):
-#     elementStresses = np.zeros((len(elements),len(scenarios)))
-#     displacements = np.zeros((len(globalStiffness),len(scenarios)))
-#     forces = np.zeros((len(globalStiffness),len(scenarios)))
-#     for i,scenario in enumerate(scenarios):
-#         modStiffness,modForcing = SpecificConditions(globalStiffness,boundaryConditions[:,scenario[0]-1:scenario[0]],forceCases[:,scenario[1]-1:scenario[1]])
-#         displacements[:,i:i+1] = np.linalg.pinv(modStiffness) @ modForcing
-#         forces[:,i:i+1] = globalStiffness @ displacements[:,i:i+1]
-#         for j,eachElement in enumerate(elements[:,0:1]):
-#             node1 = int(elements[j][2])
-#             node2 = int(elements[j][3])
-#             displacementNode1 = displacements[NodeToDOFX(node1)-1:NodeToDOFX(node1)+1,i:i+1]
-#             displacementNode2 = displacements[NodeToDOFX(node2)-1:NodeToDOFX(node2)+1,i:i+1]
-#             displacement = np.vstack((displacementNode1,displacementNode2))
-#             elementStresses[j,i] = elementStiffness[j] @ displacement
-#     return displacements,elementStresses,forces
+def NewElementdKdA(dKdA,node1,node2,boundaryCondition):
+    position1 = NodeToDOFX(node1)-1
+    position2 = NodeToDOFX(node2)-1
+    column = np.zeros((4,1))
+    row = np.zeros((1,4))
+    if (boundaryCondition[position1]==0):
+        dKdA[:,0:1] = column[:,0:1]
+        dKdA[0:1,:] = row[0:1,:]
+    if (boundaryCondition[position1+1]==0):
+        dKdA[:,1:2] = column[:,0:1]
+        dKdA[1:2,:] = row[0:1,:]
+    if (boundaryCondition[position2]==0):
+        dKdA[:,2:3] = column[:,0:1]
+        dKdA[2:3,:] = row[0:1,:]
+    if (boundaryCondition[position2+1]==0):
+        dKdA[:,3:4] = column[:,0:1]
+        dKdA[3:4,:] = row[0:1,:]
+    return dKdA
