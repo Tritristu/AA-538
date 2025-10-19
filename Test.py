@@ -2,7 +2,6 @@ import numpy as np
 import FEAfunctions as fea
 import copy
 
-
 nodes = np.array([[1,0,0],
                   [2,1,0],
                   [3,2,0]])
@@ -18,7 +17,7 @@ forceCases = np.array([[0],
 boundaryCond = np.array([[0],
                          [0],
                          [1],
-                         [1],
+                         [0],
                          [1],
                          [0]])
 scenarios = np.array([[1,1]])
@@ -56,5 +55,8 @@ for i,element in enumerate(elements):
 
 print(100*(dsAk_analytic-dsAk_FD)/dsAk_analytic)
 print(100*(duAk_analytic-duAk_FD)/duAk_analytic)
-# print(duAk_analytic)
-# print(duAk_FD)
+# print(stressRef)
+# print(stressNew)
+print(duAk_analytic)
+print("")
+print(duAk_FD)
